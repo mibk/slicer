@@ -126,24 +126,39 @@ func (sp *StmtPruner) Update(node ast.Node) ast.Node {
 		n.Decls = newDecls
 		return n
 	case *ast.FuncDecl:
-		lastStmt := n.Body.List[len(n.Body.List)-1]
-		body := sp.Update(n.Body)
-		if body == nil {
-			// Let the unused.Checker get rid of that.
+		if n.Body == nil {
+			// Preserve function without a body.
 			return n
 		}
-		newBlStmt := body.(*ast.BlockStmt)
+		lastStmt := n.Body.List[len(n.Body.List)-1]
+		if body := sp.Update(n.Body); body == nil {
+			// Just return a ReturnStmt as a body, but preserve
+			// the function in order not to break possible interfaces.
+			if n.Type.Results == nil {
+				n.Body.List = nil
+				return n
+			}
+			var ret ast.ReturnStmt
+			for _, field := range n.Type.Results.List {
+				if field.Names != nil {
+					// Use a naked return if possible.
+					break
+				}
+				ret.Results = append(ret.Results, zeroValue(field.Type))
+			}
+			n.Body.List = []ast.Stmt{&ret}
+			return n
+		}
 		if _, ok := lastStmt.(*ast.ReturnStmt); ok {
-			if newBlStmt.List[len(newBlStmt.List)-1] != lastStmt {
+			if n.Body.List[len(n.Body.List)-1] != lastStmt {
 				// Preserve required return statement.
-				newBlStmt.List = append(newBlStmt.List, lastStmt)
+				n.Body.List = append(n.Body.List, lastStmt)
 
 				// TODO: This is not enough. There could be some else-branch
 				// missing, or the default case of a switch, that could make
 				// the resulting program incorrect.
 			}
 		}
-		n.Body = newBlStmt
 		return n
 	case *ast.BlockStmt:
 		var newBlStmts []ast.Stmt
@@ -215,4 +230,35 @@ func (sp *StmtPruner) ShouldRemove(node ast.Node) bool {
 		}
 	}
 	return false
+}
+
+func zeroValue(typ ast.Expr) ast.Expr {
+	switch typ := typ.(type) {
+	case *ast.StarExpr:
+		return &ast.Ident{Name: "nil"}
+	case *ast.ArrayType:
+		return &ast.Ident{Name: "nil"}
+	case *ast.Ident:
+		switch typ.Name {
+		case "bool":
+			return &ast.Ident{Name: "false"}
+		case "string":
+			return &ast.BasicLit{Kind: token.STRING, Value: `""`}
+		case "error":
+			return &ast.Ident{Name: "nil"}
+		case
+			// Numeric types.
+			"uint8", "uint16", "uint32", "uint64",
+			"int8", "int16", "int32", "int64",
+			"float32", "float64",
+			"complex32", "complex64",
+			"byte", "rune",
+			"int", "uint",
+			"uintptr":
+			// We don't really care about the type once it's printed.
+			return &ast.BasicLit{Kind: token.INT, Value: "0"}
+		}
+		panic(typ.Name)
+	}
+	panic(fmt.Sprintf("unknown return type: %T", typ))
 }

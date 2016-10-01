@@ -1,0 +1,17 @@
+package P
+
+import "io"
+
+type T struct {
+	A string
+	B int
+}
+
+func New() io.Reader {
+	return &T{A: "something"}
+}
+
+func (t *T) Read(b []byte) (n int, err error) {
+	n = copy(b, []byte(t.A))
+	return n, nil
+}
