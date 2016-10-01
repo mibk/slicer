@@ -1,0 +1,18 @@
+package P
+
+const (
+	Two = 2
+)
+
+func Afunc(x int) int {
+	y := Two
+
+	return y * x
+}
+
+func Return(x int) bool {
+	if x < 10 {
+		return true
+	}
+	return false
+}

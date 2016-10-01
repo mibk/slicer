@@ -1,0 +1,17 @@
+package P
+
+import "strconv"
+
+type Val struct {
+	A, B       string
+	Hours, Sec int
+	Nsec       int
+}
+
+func SecondsString(v Val) string {
+	s := v.A + ": " + strconv.Itoa(v.Sec)
+	if v.Nsec != 0 {
+		s += " (B: " + strconv.Itoa(v.Nsec) + ")"
+	}
+	return s
+}

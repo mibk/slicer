@@ -1,0 +1,40 @@
+package P
+
+const (
+	SixHundred  = 600
+	NineHundred = 900
+	Thousand    = 1000
+	Two         = 2
+)
+
+var ErrNoErr = "no error"
+
+type Dummy struct {
+	Int    int
+	String string
+}
+
+func Afunc(x int) int {
+	y := Two
+	if x > 100 && x < Thousand {
+		y += 2 // add 2
+	}
+	if y > NineHundred {
+		y = NineHundred
+	}
+	return y * x
+}
+
+func Get(what string) string {
+	if what == "" {
+		return "nil"
+	}
+	return "something"
+}
+
+func Return(x int) bool {
+	if x < 10 {
+		return true
+	}
+	return false
+}
