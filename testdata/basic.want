@@ -10,9 +10,10 @@ func Afunc(x int) int {
 	return y * x
 }
 
-func Return(x int) bool {
+func Return(x int) (_a_ bool) {
 	if x < 10 {
 		return true
 	}
-	return false
+	return
+
 }

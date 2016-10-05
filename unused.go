@@ -36,25 +36,28 @@ func pruneUnusedObjs(workspace string, packages []string) {
 	}
 	defer os.Chdir(wd)
 
-	us, err := ch.Check(packages)
-	if err != nil {
+	var us []unused.Unused
+	for i := 0; i < 15; i++ { // Don't loop forever.
+		us, err = ch.Check(packages)
+		if err == nil {
+			break
+		}
+
 		// Program slicing can make resulting programs invalid (because
 		// of unused imports or variables). Try to fix it.
-
 		if errs, ok := err.(unused.Error); ok {
 			invalid := make(map[token.Pos]*token.FileSet)
 			isSerious := false
 			for p, errs := range errs.Errors {
 				for _, err := range errs {
-					if terr, ok := err.(types.Error); ok && terr.Soft {
+					if terr, ok := err.(types.Error); ok {
 						invalid[terr.Pos] = terr.Fset
 						continue
 					}
-					// Unused variables or imports are soft errors. If
-					// there are other errors than soft, report them
+					// If there are other error types, report them
 					// and exit afterwards.
-					isSerious = true
 					log.Printf("%s: %v", p, err)
+					isSerious = true
 				}
 			}
 			if !isSerious {
@@ -67,18 +70,12 @@ func pruneUnusedObjs(workspace string, packages []string) {
 					Verbosef("Fixing: %s @ %v", f, offs)
 					fix(f, offs)
 				}
-				us, err = ch.Check(packages)
-				if err != nil {
-					log.Panicf("Fixed program shouldn't contain errors: %v", err)
-				}
-				Verbosef("")
-				goto Fixed
+				continue
 			}
 		}
 		log.Fatalf("Checking unused packages: %v", err)
 	}
 
-Fixed:
 	unused := map[string][]Unused{}
 	for _, u := range us {
 		Verbosef("%s:#%d (%T)\n", u.Position.Filename, u.Position.Offset, u.Obj)
@@ -229,6 +226,8 @@ func (op *ObjPruner) ShouldRemoveMethod(fd *ast.FuncDecl) bool {
 			log.Printf("Unknown *ast.StarExpr.X: %T", expr.X)
 			return false
 		}
+	case *ast.Ident:
+		name = expr.Name
 	default:
 		log.Printf("Unknown receiver type: %T", expr)
 		return false

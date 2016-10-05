@@ -15,7 +15,7 @@ func fix(filename string, offsets []int) {
 	if err != nil {
 		log.Fatal("Parsing file %s: %v", filename, err)
 	}
-	fx := &Fixer{fset, offsets}
+	fx := &Fixer{fset, offsets, make(map[*ast.Object]bool)}
 	fx.Update(fileAST)
 
 	f, err := os.Create(filename)
@@ -31,78 +31,42 @@ func fix(filename string, offsets []int) {
 type Fixer struct {
 	fset    *token.FileSet
 	offsets []int
+
+	delObjs map[*ast.Object]bool
 }
 
-func (fx *Fixer) Update(node ast.Node) ast.Node {
+func (fx *Fixer) Update(node ast.Node) {
+	ast.Walk(fx, node)
+}
+
+func (fx *Fixer) Visit(node ast.Node) ast.Visitor {
 	switch n := node.(type) {
-	case *ast.File:
-		var newDecls []ast.Decl
-		for _, decl := range n.Decls {
-			if decl := fx.Update(decl); decl != nil {
-				newDecls = append(newDecls, decl.(ast.Decl))
+	case *ast.ImportSpec:
+		if fx.ShouldRemove(n.Pos()) {
+			n.Name = ast.NewIdent("_")
+		}
+	case *ast.Ident:
+		if (n.Obj != nil && fx.delObjs[n.Obj]) || fx.ShouldRemove(n.Pos()) {
+			if n.Obj != nil {
+				fx.delObjs[n.Obj] = true
 			}
+			n.Name = "_"
 		}
-		n.Decls = newDecls
-		return n
-	case *ast.GenDecl:
-		if n.Tok != token.IMPORT {
-			return n
+	case *ast.RangeStmt:
+		if fx.ShouldRemove(n.TokPos) {
+			n.Tok = token.ASSIGN
 		}
-		var newImports []ast.Spec
-		for _, spec := range n.Specs {
-			if spec := fx.Update(spec); spec != nil {
-				newImports = append(newImports, spec.(ast.Spec))
-			}
-		}
-		if newImports == nil {
-			return nil
-		}
-		n.Specs = newImports
-	case *ast.FuncDecl:
-		var newStmts []ast.Stmt
-		for _, stmt := range n.Body.List {
-			if stmt := fx.Update(stmt); stmt != nil {
-				newStmts = append(newStmts, stmt.(ast.Stmt))
-			}
-		}
-		if newStmts == nil {
-			return nil
-		}
-		n.Body.List = newStmts
-		return n
 	case *ast.AssignStmt:
-		var newLhs, newRhs []ast.Expr
-		for i, e := range n.Lhs {
-			if fx.ShouldRemove(e) {
-				n.Lhs[i] = &ast.Ident{Name: "_"}
-			} else {
-				// Try to remove where possible. Using _
-				// is a plan B.
-				newLhs = append(newLhs, e)
-				if len(n.Lhs) == len(n.Rhs) {
-					newRhs = append(newRhs, n.Rhs[i])
-				}
-			}
+		if fx.ShouldRemove(n.TokPos) {
+			n.Tok = token.ASSIGN
 		}
-		if newLhs == nil {
-			return nil
-		}
-		if newRhs != nil {
-			n.Lhs = newLhs
-			n.Rhs = newRhs
-		}
-		return n
 	}
-	if fx.ShouldRemove(node) {
-		return nil
-	}
-	return node
+	return fx
 }
 
-func (fx *Fixer) ShouldRemove(node ast.Node) bool {
-	// log.Printf("%T:%d  <-- %v", node, fx.fset.Position(node.Pos()).Offset, f.offsets)
+func (fx *Fixer) ShouldRemove(pos token.Pos) bool {
 	for _, off := range fx.offsets {
-		if fx.fset.Position(node.Pos()).Offset == off {
+		if fx.fset.Position(pos).Offset == off {
 			return true
 		}
 	}

@@ -124,42 +124,40 @@ func (sp *StmtPruner) Update(node ast.Node) ast.Node {
 			return nil
 		}
 		n.Decls = newDecls
-		return n
 	case *ast.FuncDecl:
 		if n.Body == nil {
 			// Preserve function without a body.
 			return n
 		}
-		lastStmt := n.Body.List[len(n.Body.List)-1]
+		fixReturn := false
 		if body := sp.Update(n.Body); body == nil {
-			// Just return a ReturnStmt as a body, but preserve
+			// Just return a single ReturnStmt as a body, but preserve
 			// the function in order not to break possible interfaces.
+			n.Body.List = nil
+			fixReturn = true
+		} else {
+			lastStmt := n.Body.List[len(n.Body.List)-1]
+			if _, ok := lastStmt.(*ast.ReturnStmt); !ok {
+				fixReturn = true
+			}
+		}
+		if fixReturn {
 			if n.Type.Results == nil {
-				n.Body.List = nil
 				return n
 			}
-			var ret ast.ReturnStmt
+			index := 0
 			for _, field := range n.Type.Results.List {
 				if field.Names != nil {
-					// Use a naked return if possible.
 					break
 				}
-				ret.Results = append(ret.Results, zeroValue(field.Type))
+				field.Names = []*ast.Ident{{Name: "_" + string(index+'a') + "_"}}
+				index++
 			}
-			n.Body.List = []ast.Stmt{&ret}
-			return n
+			n.Body.List = append(n.Body.List, &ast.ReturnStmt{})
 		}
-		if _, ok := lastStmt.(*ast.ReturnStmt); ok {
-			if n.Body.List[len(n.Body.List)-1] != lastStmt {
-				// Preserve required return statement.
-				n.Body.List = append(n.Body.List, lastStmt)
-
-				// TODO: This is not enough. There could be some else-branch
-				// missing, or the default case of a switch, that could make
-				// the resulting program incorrect.
-			}
+		if n.Body == nil {
+			panic("body shoudn't be nil")
 		}
-		return n
 	case *ast.BlockStmt:
 		var newBlStmts []ast.Stmt
 		for _, stmt := range n.List {
@@ -171,35 +169,30 @@ func (sp *StmtPruner) Update(node ast.Node) ast.Node {
 			return nil
 		}
 		n.List = newBlStmts
-		return n
 	case *ast.IfStmt:
 		body := sp.Update(n.Body)
 		if body == nil {
 			return nil
 		}
 		n.Body = body.(*ast.BlockStmt)
-		return n
 	case *ast.ForStmt:
 		body := sp.Update(n.Body)
 		if body == nil {
 			return nil
 		}
 		n.Body = body.(*ast.BlockStmt)
-		return n
 	case *ast.RangeStmt:
 		body := sp.Update(n.Body)
 		if body == nil {
 			return nil
 		}
 		n.Body = body.(*ast.BlockStmt)
-		return n
 	case *ast.SwitchStmt:
 		body := sp.Update(n.Body)
 		if body == nil {
 			return nil
 		}
 		n.Body = body.(*ast.BlockStmt)
-		return n
 	case *ast.CaseClause:
 		var newBlStmts []ast.Stmt
 		for _, stmt := range n.Body {
@@ -211,14 +204,22 @@ func (sp *StmtPruner) Update(node ast.Node) ast.Node {
 			return nil
 		}
 		n.Body = newBlStmts
-		return n
 	case *ast.LabeledStmt:
 		stmt := sp.Update(n.Stmt)
 		if stmt == nil {
 			return nil
 		}
 		n.Stmt = stmt.(ast.Stmt)
-		return n
+	case *ast.AssignStmt:
+		// Uncovered ranges don't include statements
+		// that have another scope (meaning {} block).
+		// We can be sure that if the first lhs expr
+		// in the assign stmt isn't in the range, the
+		// whole statement isn't.
+		// TODO: There is probably more cases like this.
+		if sp.ShouldRemove(n.Lhs[0]) {
+			return nil
+		}
 	}
 	return node
 }
@@ -230,35 +231,4 @@ func (sp *StmtPruner) ShouldRemove(node ast.Node) bool {
 		}
 	}
 	return false
-}
-
-func zeroValue(typ ast.Expr) ast.Expr {
-	switch typ := typ.(type) {
-	case *ast.StarExpr:
-		return &ast.Ident{Name: "nil"}
-	case *ast.ArrayType:
-		return &ast.Ident{Name: "nil"}
-	case *ast.Ident:
-		switch typ.Name {
-		case "bool":
-			return &ast.Ident{Name: "false"}
-		case "string":
-			return &ast.BasicLit{Kind: token.STRING, Value: `""`}
-		case "error":
-			return &ast.Ident{Name: "nil"}
-		case
-			// Numeric types.
-			"uint8", "uint16", "uint32", "uint64",
-			"int8", "int16", "int32", "int64",
-			"float32", "float64",
-			"complex32", "complex64",
-			"byte", "rune",
-			"int", "uint",
-			"uintptr":
-			// We don't really care about the type once it's printed.
-			return &ast.BasicLit{Kind: token.INT, Value: "0"}
-		}
-		panic(typ.Name)
-	}
-	panic(fmt.Sprintf("unknown return type: %T", typ))
 }
